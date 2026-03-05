@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
@@ -30,13 +31,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("=== Super-Agent-OS starting ===")
     logger.info("Log level: %s", settings.log_level)
 
+    # Ensure data directory exists
+    Path("data").mkdir(exist_ok=True)
+
     # Initialize model factory
     factory = ModelFactory(settings)
-    logger.info("Available models: %s", factory.available_models())
 
     # Initialize agent
     _agent = Agent(factory)
     logger.info("Agent initialized — ready to chat")
+
+    # ── Phase 3: Discover and register skills ──
+    from app.skills import discover_and_register_skills, _registry
+
+    skill_count = discover_and_register_skills()
+    logger.info("Discovered %d skill(s)", skill_count)
+    _agent.register_skills(_registry)
+
+    # ── Initialize reminder scheduler + sync from Bitable ──
+    from app.skills.reminder import init_scheduler, sync_reminders_from_bitable
+
+    init_scheduler()
+
+    if settings.feishu_bitable_app_token and settings.feishu_bitable_reminder_table_id:
+        synced = await sync_reminders_from_bitable()
+        logger.info("Synced %d reminders from Bitable", synced)
+    else:
+        logger.warning("Bitable not configured — reminder sync skipped")
 
     # Start Feishu WebSocket client (long-connection, no public URL needed)
     if settings.feishu_app_id and settings.feishu_app_secret:
@@ -55,6 +76,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown
+    from app.skills.reminder import get_scheduler
+
+    try:
+        get_scheduler().shutdown(wait=False)
+        logger.info("Reminder scheduler shut down")
+    except Exception:
+        pass
+
     logger.info("=== Super-Agent-OS shutting down ===")
     _agent = None
 

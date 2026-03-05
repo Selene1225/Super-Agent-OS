@@ -54,3 +54,6 @@ docker-compose.override.yml
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Egg info
+super_agent_os.egg-info/
