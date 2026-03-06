@@ -1,7 +1,7 @@
 """Skill auto-discovery and registry.
 
-Scans `app/skills/*.py` for BaseSkill subclasses, imports them dynamically,
-and provides `get_skill(name)` / `list_all_skills()`.
+Scans `app/skills/` for sub-packages containing BaseSkill subclasses,
+imports them dynamically, and provides `get_skill(name)` / `list_all_skills()`.
 """
 
 from __future__ import annotations
@@ -37,22 +37,37 @@ def discover_and_register_skills() -> int:
             logger.error("Failed to import skill module %s: %s", full_name, e)
             continue
 
-        # Find all BaseSkill subclasses in the module
-        for attr_name, obj in inspect.getmembers(mod, inspect.isclass):
-            if issubclass(obj, BaseSkill) and obj is not BaseSkill:
+        # For sub-packages, also scan their direct members
+        modules_to_scan = [mod]
+        if is_pkg:
+            for _imp, sub_name, _sub_is_pkg in pkgutil.iter_modules(mod.__path__):
+                if sub_name.startswith("_"):
+                    continue
                 try:
-                    instance = obj()
-                    name = instance.manifest.name
-                    _registry[name] = instance
-                    logger.info(
-                        "Skill registered: %s (%s) v%s",
-                        name,
-                        instance.manifest.description,
-                        instance.manifest.version,
-                    )
-                    count += 1
+                    sub_mod = importlib.import_module(f"{full_name}.{sub_name}")
+                    modules_to_scan.append(sub_mod)
                 except Exception as e:
-                    logger.error("Failed to instantiate skill %s.%s: %s", full_name, attr_name, e)
+                    logger.error("Failed to import %s.%s: %s", full_name, sub_name, e)
+
+        # Find all BaseSkill subclasses
+        for scan_mod in modules_to_scan:
+            for attr_name, obj in inspect.getmembers(scan_mod, inspect.isclass):
+                if issubclass(obj, BaseSkill) and obj is not BaseSkill:
+                    if obj.__module__ != scan_mod.__name__:
+                        continue  # skip re-exports to avoid duplicates
+                    try:
+                        instance = obj()
+                        name = instance.manifest.name
+                        _registry[name] = instance
+                        logger.info(
+                            "Skill registered: %s (%s) v%s",
+                            name,
+                            instance.manifest.description,
+                            instance.manifest.version,
+                        )
+                        count += 1
+                    except Exception as e:
+                        logger.error("Failed to instantiate skill %s.%s: %s", full_name, attr_name, e)
 
     return count
 

@@ -46,7 +46,11 @@ app/
 ├── skills/
 │   ├── __init__.py           # 技能自动发现与注册
 │   ├── base.py               # BaseSkill / SkillManifest / SkillContext
-│   └── reminder.py           # 提醒技能（飞书多维表格 + APScheduler）
+│   └── reminder/             # 提醒技能
+│       ├── skill.py          # ReminderSkill 主类
+│       ├── bitable.py        # 飞书多维表格 CRUD
+│       ├── scheduler.py      # APScheduler 调度
+│       └── prompts.py        # LLM prompt 模板
 └── utils/
     ├── config.py             # pydantic-settings 配置
     ├── feishu.py             # 飞书 API 封装（消息、Bitable CRUD）

@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _agent.register_skills(_registry)
 
     # ── Initialize reminder scheduler + sync from Bitable ──
-    from app.skills.reminder import init_scheduler, sync_reminders_from_bitable
+    from app.skills.reminder.scheduler import init_scheduler, sync_reminders_from_bitable
 
     init_scheduler()
 
@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown
-    from app.skills.reminder import get_scheduler
+    from app.skills.reminder.scheduler import get_scheduler
 
     try:
         get_scheduler().shutdown(wait=False)
