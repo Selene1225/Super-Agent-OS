@@ -27,6 +27,7 @@ class DoubaoProvider(BaseLLMProvider):
         *,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        enable_thinking: bool | None = None,
     ) -> str:
         logger.debug("DoubaoProvider.chat — %d messages, model=%s", len(messages), self._model)
         response = await self._client.chat.completions.create(

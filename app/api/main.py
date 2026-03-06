@@ -34,6 +34,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Ensure data directory exists
     Path("data").mkdir(exist_ok=True)
 
+    # ── Phase 5.2: Initialize memory system ──
+    from app.core.memory import init_memory
+    init_memory()
+
     # Initialize model factory
     factory = ModelFactory(settings)
 

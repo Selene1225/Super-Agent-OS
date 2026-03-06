@@ -100,6 +100,7 @@ class ModelFactory:
         *,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        enable_thinking: bool | None = None,
     ) -> str:
         """Get a chat completion, with automatic fallback on failure.
 
@@ -121,6 +122,7 @@ class ModelFactory:
                     messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    enable_thinking=enable_thinking,
                 )
                 if attempts > 0:
                     logger.info(
@@ -154,6 +156,30 @@ class ModelFactory:
     # Introspection
     # ------------------------------------------------------------------ #
 
+    @property
+    def primary_model_name(self) -> str | None:
+        """Return the name of the current primary model."""
+        return self._primary.model_name if self._primary else None
+
     def available_models(self) -> list[str]:
         """Return names of all configured providers."""
         return [p.model_name for p in self._providers]
+
+    def get_provider(self, model_name: str) -> BaseLLMProvider | None:
+        """Look up a provider by model name (case-insensitive partial match)."""
+        target = model_name.lower()
+        for p in self._providers:
+            if target in p.model_name.lower():
+                return p
+        return None
+
+    def switch_primary(self, model_name: str) -> bool:
+        """Switch the primary provider at runtime. Returns True on success."""
+        provider = self.get_provider(model_name)
+        if provider is None:
+            return False
+        self._primary = provider
+        # Reorder: primary first, then the rest
+        self._providers = [provider] + [p for p in self._providers if p is not provider]
+        logger.info("Switched primary model to: %s", provider.model_name)
+        return True

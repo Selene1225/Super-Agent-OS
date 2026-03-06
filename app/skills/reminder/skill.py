@@ -230,7 +230,7 @@ class ReminderSkill(BaseSkill):
             {"role": "user", "content": user_text},
         ]
         try:
-            raw = await factory.get_response(messages, temperature=0.1, max_tokens=256)
+            raw = await factory.get_response(messages, temperature=0.1, max_tokens=256, enable_thinking=False)
             return self._parse_json(raw)
         except Exception as e:
             logger.error("Failed to parse reminder time: %s", e)
@@ -257,7 +257,7 @@ class ReminderSkill(BaseSkill):
             {"role": "user", "content": user_text},
         ]
         try:
-            raw = await factory.get_response(messages, temperature=0.1, max_tokens=256)
+            raw = await factory.get_response(messages, temperature=0.1, max_tokens=256, enable_thinking=False)
             result = self._parse_json(raw)
 
             # Auto-match: if only 1 reminder and no index specified, default to 1

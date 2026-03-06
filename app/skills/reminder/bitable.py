@@ -11,6 +11,21 @@ from app.utils.logger import logger
 TZ = ZoneInfo("Asia/Shanghai")
 
 
+def _extract_text(value) -> str:
+    """Extract plain text from a Bitable field value.
+
+    Bitable returns rich-text fields as lists like:
+        [{"text": "actual value", "type": "text"}]
+    This helper normalises any format to a plain string.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        # Rich-text segments: concatenate all text parts
+        return "".join(seg.get("text", "") for seg in value if isinstance(seg, dict))
+    return str(value) if value is not None else ""
+
+
 def _get_bitable_config() -> tuple[str, str]:
     settings = get_settings()
     app_token = settings.feishu_bitable_app_token
@@ -87,7 +102,7 @@ async def fetch_pending(open_id: str | None = None) -> list[dict]:
         fields = item.get("fields", {})
         if fields.get("状态") != "待执行":
             continue
-        item_open_id = fields.get("创建人", "")
+        item_open_id = _extract_text(fields.get("创建人", ""))
         if open_id and item_open_id != open_id:
             continue
         ts = fields.get("提醒时间")
@@ -96,7 +111,7 @@ async def fetch_pending(open_id: str | None = None) -> list[dict]:
             remind_at_str = datetime.fromtimestamp(ts / 1000, tz=TZ).strftime("%Y-%m-%d %H:%M")
         pending.append({
             "record_id": item["record_id"],
-            "content": fields.get("提醒内容", ""),
+            "content": _extract_text(fields.get("提醒内容", "")),
             "remind_at_ts": ts,
             "remind_at_str": remind_at_str,
             "open_id": item_open_id,

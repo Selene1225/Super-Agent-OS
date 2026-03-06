@@ -20,40 +20,56 @@ from app.utils.logger import logger
 _agent: Any = None
 _loop: asyncio.AbstractEventLoop | None = None
 
-# Message dedup — message_id -> timestamp
+# Message dedup — message_id -> timestamp (thread-safe with lock)
 _seen_messages: dict[str, float] = {}
+_seen_lock = threading.Lock()
 _DEDUP_TTL = 300  # 5 minutes
 
 
 def _is_duplicate(message_id: str) -> bool:
-    """Check if we've already processed this message."""
+    """Check if we've already processed this message (thread-safe)."""
     now = time.time()
-    # Cleanup expired entries
-    expired = [mid for mid, ts in _seen_messages.items() if now - ts > _DEDUP_TTL]
-    for mid in expired:
-        del _seen_messages[mid]
-    # Check and mark
-    if message_id in _seen_messages:
-        return True
-    _seen_messages[message_id] = now
-    return False
+    with _seen_lock:
+        # Cleanup expired entries
+        expired = [mid for mid, ts in _seen_messages.items() if now - ts > _DEDUP_TTL]
+        for mid in expired:
+            del _seen_messages[mid]
+        # Atomic check and mark
+        if message_id in _seen_messages:
+            return True
+        _seen_messages[message_id] = now
+        return False
 
 
-async def _process_and_reply(text: str, open_id: str) -> None:
+async def _process_and_reply(text: str, open_id: str, message_id: str) -> None:
     """Process message through Agent and send reply via Feishu API."""
     from app.utils.feishu import send_text_message
 
-    reply = await _agent.process(text, chat_id=open_id)
-    await send_text_message(receive_id=open_id, text=reply)
+    try:
+        reply = await _agent.process(text, chat_id=open_id)
+        await send_text_message(receive_id=open_id, text=reply)
+    except Exception as e:
+        logger.error("Processing failed for msg %s: %s", message_id, e, exc_info=True)
+        try:
+            await send_text_message(receive_id=open_id, text=f"处理出错：{e}")
+        except Exception:
+            pass
 
 
 def _on_message_receive(data: P2ImMessageReceiveV1) -> None:
-    """Handle im.message.receive_v1 event from Feishu WebSocket."""
+    """Handle im.message.receive_v1 event from Feishu WebSocket.
+
+    IMPORTANT: This callback runs inside the SDK's asyncio event loop.
+    We MUST return immediately so the SDK can send the ack frame back to
+    Feishu servers promptly. Blocking here would:
+      1. Delay the ack → Feishu server retries → duplicate events
+      2. Freeze the SDK event loop → ping timeout → reconnect → more duplicates
+    """
     try:
         message = data.event.message
         sender = data.event.sender
 
-        # Dedup by message_id
+        # Dedup by message_id (thread-safe with lock)
         message_id = message.message_id
         if message_id and _is_duplicate(message_id):
             logger.debug("WS: duplicate message ignored: %s", message_id)
@@ -75,16 +91,16 @@ def _on_message_receive(data: P2ImMessageReceiveV1) -> None:
             logger.warning("WS: no open_id in sender")
             return
 
-        logger.info("WS received from %s: %s", open_id, text[:80])
+        logger.info("WS received [%s] from %s: %s", message_id, open_id, text[:80])
 
-        # Dispatch async processing to the main event loop (this callback runs in WS thread)
+        # Fire-and-forget: dispatch to main event loop, return immediately
+        # so SDK can ack the event frame without delay
         assert _loop is not None, "Event loop not initialized"
-        future = asyncio.run_coroutine_threadsafe(
-            _process_and_reply(text, open_id),
+        asyncio.run_coroutine_threadsafe(
+            _process_and_reply(text, open_id, message_id),
             _loop,
         )
-        # Block WS thread until processing completes (OK — WS SDK handles concurrency)
-        future.result(timeout=120)
+        # DO NOT call future.result() — return immediately to unblock SDK
 
     except Exception as e:
         logger.error("WS message handler error: %s", e, exc_info=True)
