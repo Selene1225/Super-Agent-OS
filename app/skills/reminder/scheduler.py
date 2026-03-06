@@ -68,6 +68,17 @@ def schedule_job(record_id: str, open_id: str, content: str, remind_at: datetime
     logger.info("Scheduled job %s at %s", job_id, remind_at)
 
 
+def cancel_job(record_id: str) -> None:
+    """Cancel (remove) a scheduled reminder job."""
+    scheduler = get_scheduler()
+    job_id = f"reminder_{record_id}"
+    try:
+        scheduler.remove_job(job_id)
+        logger.info("Cancelled job %s", job_id)
+    except Exception:
+        logger.debug("Job %s not found (may have already fired)", job_id)
+
+
 # ─── Startup sync ────────────────────────────────────────────────────────
 
 async def sync_reminders_from_bitable() -> int:

@@ -35,8 +35,10 @@ _ROUTER_SYSTEM_PROMPT = """\
 1. 只输出 JSON，不要输出任何其他文字
 2. "action" 根据技能定义选择合适的子动作
 3. 对于 reminder 技能：
-   - 用户想设置提醒 → action="set"
+   - 用户想设置新提醒 → action="set"
    - 用户想查看提醒/安排 → action="list"
+   - 用户想修改已有提醒（改时间、改内容）→ action="update"
+   - 用户想取消/删除已有提醒 → action="cancel"
 4. 如果用户的意图不明确或不匹配任何技能，返回 {{"skill": "chat"}}
 """
 
@@ -158,7 +160,7 @@ class Agent:
                 lines.append(f"  示例: {examples}")
             # Document available actions per skill
             if m.name == "reminder":
-                lines.append("  子动作: set（设置提醒）, list（查看提醒）")
+                lines.append("  子动作: set（设置新提醒）, list（查看提醒）, update（修改提醒时间/内容）, cancel（取消/删除提醒）")
         return "\n".join(lines)
 
     # ─── Plain chat ──────────────────────────────────────
