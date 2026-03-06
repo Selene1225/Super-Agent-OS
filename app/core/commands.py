@@ -276,3 +276,117 @@ async def cmd_compact(args: str, agent: "Agent", chat_id: str) -> str:
     agent.histories[chat_id] = []
 
     return f"📦 对话已压缩。\n\n**摘要**：{summary}"
+
+
+# ─── Phase 6: Marketplace command ─────────────────────────────────────────
+
+
+@slash_command("/market", "技能市场 (search/install/remove/list)")
+async def cmd_market(args: str, agent: "Agent", chat_id: str) -> str:
+    """Skill marketplace — search, install, remove, list.
+
+    Usage:
+        /market                  — list installed marketplace skills
+        /market search <query>   — search for skill packages
+        /market install <name>   — install a skill package
+        /market remove <name>    — uninstall a skill package
+    """
+    from app.core.marketplace import (
+        get_installed_packages,
+        install_skill,
+        search,
+        uninstall_skill,
+    )
+    from app.core.marketplace.models import SkillPackageInfo
+
+    parts = args.strip().split(maxsplit=1)
+    sub_cmd = parts[0].lower() if parts else "list"
+    sub_args = parts[1].strip() if len(parts) > 1 else ""
+
+    # ── /market list (or just /market) ──
+    if sub_cmd in ("list", "ls", "") or not args.strip():
+        installed = get_installed_packages()
+        if not installed:
+            return (
+                "📦 当前没有通过技能市场安装的技能。\n\n"
+                "💡 命令：\n"
+                "  /market search <关键词>  — 搜索技能包\n"
+                "  /market install <包名>   — 安装技能包"
+            )
+        lines = ["📦 **已安装的市场技能**", ""]
+        for pkg_name, info in installed.items():
+            skill_name = info.get("skill_name", "?")
+            version = info.get("version", "?")
+            source = info.get("source", "?")
+            installed_at = info.get("installed_at", "?")[:10]
+            lines.append(f"  • **{skill_name}** ({pkg_name}) v{version}")
+            lines.append(f"    来源: {source} | 安装日期: {installed_at}")
+        lines.append("")
+        lines.append(f"共 {len(installed)} 个市场技能")
+        return "\n".join(lines)
+
+    # ── /market search <query> ──
+    if sub_cmd == "search":
+        if not sub_args:
+            return "用法: /market search <关键词>\n示例: /market search weather"
+        results = await search(sub_args)
+        if not results:
+            return (
+                f"🔍 搜索「{sub_args}」的技能包...\n\n"
+                f"暂未在 PyPI 和 GitHub 上找到匹配的 sao-skill-* 技能包。\n\n"
+                f"💡 SAO 技能市场还在成长中，欢迎贡献技能包！"
+            )
+        lines = [f"🔍 搜索「{sub_args}」找到 {len(results)} 个技能包：", ""]
+        for i, pkg in enumerate(results, 1):
+            source_tag = f"[{pkg.source.upper()}]"
+            stars = f" ⭐{pkg.stars}" if pkg.stars else ""
+            lines.append(f"  {i}. **{pkg.name}** v{pkg.version} {source_tag}{stars}")
+            lines.append(f"     {pkg.description}")
+            if pkg.author:
+                lines.append(f"     作者: {pkg.author}")
+        lines.append("")
+        lines.append("安装命令: /market install <包名>")
+        return "\n".join(lines)
+
+    # ── /market install <name> ──
+    if sub_cmd == "install":
+        if not sub_args:
+            return "用法: /market install <包名>\n示例: /market install sao-skill-weather"
+        name = sub_args.strip()
+        # Normalise
+        if not name.startswith("sao-skill-") and not name.startswith("git+"):
+            name = f"sao-skill-{name}"
+        install_target = name
+        source = "pypi"
+        if name.startswith("git+") or name.startswith("http"):
+            source = "github"
+            install_target = name
+            pkg = name.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+            name = pkg
+
+        ok, msg, skill = await install_skill(install_target, name, source)
+        if ok and skill:
+            agent.register_new_skill(skill)
+        return msg
+
+    # ── /market remove <name> ──
+    if sub_cmd in ("remove", "uninstall", "rm"):
+        if not sub_args:
+            return "用法: /market remove <包名>\n示例: /market remove sao-skill-weather"
+        name = sub_args.strip()
+        if not name.startswith("sao-skill-"):
+            name = f"sao-skill-{name}"
+        ok, msg, skill_name = await uninstall_skill(name)
+        if ok and skill_name:
+            agent.unregister_skill(skill_name)
+        return msg
+
+    # ── Unknown subcommand ──
+    return (
+        f"未知的市场子命令: {sub_cmd}\n\n"
+        "可用子命令:\n"
+        "  /market search <关键词>  — 搜索技能包\n"
+        "  /market install <包名>   — 安装技能包\n"
+        "  /market remove <包名>    — 卸载技能包\n"
+        "  /market list             — 查看已安装的市场技能"
+    )

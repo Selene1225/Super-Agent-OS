@@ -17,6 +17,12 @@ class SkillManifest:
     version: str = "0.1.0"
     # Optional cron schedule (APScheduler format) for periodic skills
     schedule: str | None = None
+    # Regex patterns that trigger this skill (used by keyword fast-path)
+    # Dynamically installed skills MUST declare these to be routable.
+    trigger_patterns: list[str] = field(default_factory=list)
+    # Available actions with docs for LLM router prompt (auto-generated if empty)
+    # Format: "action_name（描述，params: {key: "说明"}）"
+    actions_doc: str = ""
 
 
 class BaseSkill(ABC):
@@ -50,3 +56,4 @@ class SkillContext:
     user_message: str  # the original user message
     chat_id: str  # Feishu open_id or chat_id
     factory: Any  # ModelFactory instance for LLM calls
+    agent: Any = None  # Agent instance (optional — used by marketplace for hot-reload)

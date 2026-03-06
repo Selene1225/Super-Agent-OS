@@ -50,6 +50,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     skill_count = discover_and_register_skills()
     logger.info("Discovered %d skill(s)", skill_count)
+
+    # ── Phase 6: Load previously-installed marketplace skills ──
+    from app.core.marketplace.installer import load_marketplace_skills
+
+    mp_skills = load_marketplace_skills()
+    if mp_skills:
+        _registry.update(mp_skills)
+        logger.info("Loaded %d marketplace skill(s): %s", len(mp_skills), list(mp_skills.keys()))
+
     _agent.register_skills(_registry)
 
     # ── Initialize reminder scheduler + sync from Bitable ──

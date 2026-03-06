@@ -34,6 +34,13 @@ _SKILL_KEYWORDS: dict[str, list[str]] = {
         r"点.*叫我", r"后.*叫我",
         r"别忘了.{2,}",  # "别忘了" + specific content = potential reminder
     ],
+    "marketplace": [
+        r"搜索.*技能", r"安装.*技能", r"卸载.*技能", r"删除.*技能",
+        r"装.*技能", r"找.*技能", r"有什么.*技能.*可以",
+        r"技能市场", r"技能包", r"技能商店",
+        r"sao-skill", r"sao_skill",
+        r"skill.*(market|store|install)", r"install.*skill",
+    ],
 }
 
 # ─── Intent routing prompt (injected with live skill list) ───────────────
@@ -57,7 +64,12 @@ _ROUTER_SYSTEM_PROMPT = """\
    - 用户想查看提醒/安排 → action="list"
    - 用户想修改已有提醒（改时间、改内容）→ action="update"
    - 用户想取消/删除已有提醒 → action="cancel"
-4. 如果用户的意图不明确或不匹配任何技能，返回 {{"skill": "chat"}}
+4. 对于 marketplace 技能：
+   - 搜索/查找技能 → action="search", params: {{"query": "关键词"}}
+   - 安装技能包 → action="install", params: {{"name": "包名"}}
+   - 卸载/删除技能 → action="remove", params: {{"name": "包名"}}
+   - 查看已安装/列表 → action="list"
+5. 如果用户的意图不明确或不匹配任何技能，返回 {{"skill": "chat"}}
 """
 
 _CHAT_SYSTEM_PROMPT = (
@@ -105,6 +117,29 @@ class Agent:
         self._skills = skills
         names = list(skills.keys())
         logger.info("Agent registered %d skills: %s", len(names), names)
+
+    def register_new_skill(self, skill: BaseSkill) -> None:
+        """Hot-register a newly installed skill at runtime."""
+        name = skill.manifest.name
+        self._skills[name] = skill
+        # Also update the global skills registry
+        from app.skills import _registry
+        _registry[name] = skill
+        logger.info("Hot-loaded skill: %s v%s", name, skill.manifest.version)
+
+    def unregister_skill(self, skill_name: str) -> bool:
+        """Unregister a skill at runtime. Returns True if removed."""
+        removed = False
+        if skill_name in self._skills:
+            del self._skills[skill_name]
+            removed = True
+        from app.skills import _registry
+        if skill_name in _registry:
+            del _registry[skill_name]
+            removed = True
+        if removed:
+            logger.info("Unregistered skill: %s", skill_name)
+        return removed
 
     # ─── Main entry point ─────────────────────────────────
 
@@ -155,6 +190,7 @@ class Agent:
                             user_message=user_message,
                             chat_id=chat_id,
                             factory=self._factory,
+                            agent=self,
                         )
                         params = {
                             "action": intent.get("action", ""),
@@ -187,13 +223,23 @@ class Agent:
 
         Returns True if any registered skill's trigger keywords match.
         This avoids an expensive LLM router call for simple chat messages.
+
+        Checks two sources:
+        1. Hardcoded _SKILL_KEYWORDS (built-in skills)
+        2. skill.manifest.trigger_patterns (works for dynamically installed skills)
         """
         text = user_message.lower().strip()
-        for skill_name in self._skills:
+        for skill_name, skill in self._skills.items():
+            # Source 1: hardcoded keywords
             patterns = _SKILL_KEYWORDS.get(skill_name, [])
             for pat in patterns:
                 if re.search(pat, text):
                     logger.debug("Keyword '%s' matched for skill '%s'", pat, skill_name)
+                    return True
+            # Source 2: manifest-declared trigger patterns
+            for pat in skill.manifest.trigger_patterns:
+                if re.search(pat, text):
+                    logger.debug("Manifest trigger '%s' matched for skill '%s'", pat, skill_name)
                     return True
         return False
 
@@ -275,6 +321,17 @@ class Agent:
         if not self._skills:
             return "（无可用技能）"
 
+        # Fallback action docs for built-in skills without actions_doc
+        _BUILTIN_ACTIONS: dict[str, str] = {
+            "reminder": "子动作: set（设置新提醒）, list（查看提醒）, update（修改提醒时间/内容）, cancel（取消/删除提醒）",
+            "marketplace": (
+                '子动作: search（搜索技能，params: {query: "关键词"}）, '
+                'install（安装指定包，params: {name: "sao-skill-xxx"}）, '
+                'remove（卸载，params: {name: "sao-skill-xxx"}）, '
+                'list（列出已安装的市场技能）'
+            ),
+        }
+
         lines = []
         for skill in self._skills.values():
             m = skill.manifest
@@ -282,9 +339,10 @@ class Agent:
             lines.append(f"- {m.name}: {m.description}")
             if examples:
                 lines.append(f"  示例: {examples}")
-            # Document available actions per skill
-            if m.name == "reminder":
-                lines.append("  子动作: set（设置新提醒）, list（查看提醒）, update（修改提醒时间/内容）, cancel（取消/删除提醒）")
+            # Action docs: prefer manifest-declared, fall back to built-in
+            actions_doc = m.actions_doc or _BUILTIN_ACTIONS.get(m.name, "")
+            if actions_doc:
+                lines.append(f"  {actions_doc}")
         return "\n".join(lines)
 
     # ─── Plain chat ──────────────────────────────────────

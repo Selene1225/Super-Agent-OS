@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sao-skill-weather"
+version = "0.1.0"
+description = "天气查询技能 — SAO 技能包，支持中国及全球城市实时天气"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["sao", "skill", "weather"]
+
+dependencies = [
+    "python-weather>=2.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["sao_skill_weather*"]
